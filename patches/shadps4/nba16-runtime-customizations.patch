@@ -1,5 +1,5 @@
 diff --git a/src/core/devtools/layer.cpp b/src/core/devtools/layer.cpp
-index da64436f..006dcbd3 100644
+index da64436f..faf90bb6 100644
 --- a/src/core/devtools/layer.cpp
 +++ b/src/core/devtools/layer.cpp
 @@ -4,6 +4,7 @@
@@ -10,15 +10,17 @@ index da64436f..006dcbd3 100644
  #include <imgui.h>
  
  #include "SDL3/SDL_log.h"
-@@ -14,6 +15,7 @@
+@@ -14,7 +15,9 @@
  #include "core/emulator_state.h"
  #include "imgui/imgui_std.h"
  #include "imgui_internal.h"
 +#include "input/input_handler.h"
  #include "options.h"
++#include "sdl_window.h"
  #include "video_core/renderer_vulkan/vk_presenter.h"
  #include "widget/frame_dump.h"
-@@ -23,6 +25,10 @@
+ #include "widget/frame_graph.h"
+@@ -23,6 +26,10 @@
  #include "widget/module_list.h"
  #include "widget/shader_list.h"
  
@@ -29,7 +31,7 @@ index da64436f..006dcbd3 100644
  extern std::unique_ptr<Vulkan::Presenter> presenter;
  
  using namespace ImGui;
-@@ -33,6 +39,11 @@ static bool show_simple_fps = false;
+@@ -33,6 +40,20 @@ static bool show_simple_fps = false;
  static bool visibility_toggled = false;
  static bool fps_pinned = false;
  static bool show_quit_window = false;
@@ -37,11 +39,20 @@ index da64436f..006dcbd3 100644
 +static bool show_port_menu = false;
 +static int port_menu_selection = 0;
 +static bool port_menu_fullscreen = false;
++static int port_menu_resolution = 1;
++static bool port_menu_fsr = false;
++static constexpr int port_menu_resolution_sizes[][2] = {
++    {1280, 720}, {1920, 1080}, {2560, 1440}, {3840, 2160},
++};
++static constexpr const char* port_menu_resolution_labels[] = {
++    "1280 × 720 (720p)", "1920 × 1080 (1080p)",
++    "2560 × 1440 (1440p)", "3840 × 2160 (4K)",
++};
 +#endif
  
  static bool show_volume = false;
  static float volume_start_time;
-@@ -387,7 +398,11 @@ void L::SetupSettings() {
+@@ -387,7 +408,11 @@ void L::SetupSettings() {
  }
  
  bool L::ShouldKeepDrawing() {
@@ -53,7 +64,7 @@ index da64436f..006dcbd3 100644
  }
  
  void L::Draw() {
-@@ -454,6 +469,68 @@ void L::Draw() {
+@@ -454,6 +479,92 @@ void L::Draw() {
          End();
      }
  
@@ -63,9 +74,9 @@ index da64436f..006dcbd3 100644
 +            Overlay::TogglePortMenu();
 +        } else {
 +            if (IsKeyPressed(ImGuiKey_GamepadDpadUp, false) || IsKeyPressed(ImGuiKey_UpArrow, false))
-+                port_menu_selection = (port_menu_selection + 3) % 4;
++                port_menu_selection = (port_menu_selection + 5) % 6;
 +            if (IsKeyPressed(ImGuiKey_GamepadDpadDown, false) || IsKeyPressed(ImGuiKey_DownArrow, false))
-+                port_menu_selection = (port_menu_selection + 1) % 4;
++                port_menu_selection = (port_menu_selection + 1) % 6;
 +            if (IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || IsKeyPressed(ImGuiKey_Enter, false)) {
 +                if (port_menu_selection == 0) {
 +                    SDL_Event event{};
@@ -74,15 +85,25 @@ index da64436f..006dcbd3 100644
 +                    port_menu_fullscreen = !port_menu_fullscreen;
 +                } else if (port_menu_selection == 1) {
 +                    Overlay::ToggleSimpleFps();
++                } else if (port_menu_selection == 2) {
++                    port_menu_resolution = (port_menu_resolution + 1) % 4;
++                    if (presenter) {
++                        SDL_SetWindowSize(presenter->GetWindow().GetSDLWindow(),
++                                          port_menu_resolution_sizes[port_menu_resolution][0],
++                                          port_menu_resolution_sizes[port_menu_resolution][1]);
++                    }
++                } else if (port_menu_selection == 3) {
++                    port_menu_fsr = !port_menu_fsr;
++                    if (presenter) presenter->GetFsrSettingsRef().enable = port_menu_fsr;
 +                } else {
 +                    show_port_menu = false;
-+                    NBA16_RequestMenuAction(port_menu_selection - 1);
++                    NBA16_RequestMenuAction(port_menu_selection - 3);
 +                }
 +            }
 +
 +            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
 +            ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-+            ImGui::SetNextWindowSize(ImVec2(420.0f, 300.0f), ImGuiCond_Always);
++            ImGui::SetNextWindowSize(ImVec2(470.0f, 390.0f), ImGuiCond_Always);
 +            ImGui::SetNextWindowFocus();
 +            ImGui::SetNextWindowBgAlpha(0.96f);
 +            if (Begin("NBA LIVE 16 — Menu do jogo", nullptr,
@@ -95,8 +116,11 @@ index da64436f..006dcbd3 100644
 +                Spacing();
 +                const char* fullscreen_label = port_menu_fullscreen ? "Mudar para modo janela" : "Mudar para tela cheia";
 +                const char* fps_label = show_simple_fps ? "Contador de FPS: ligado" : "Contador de FPS: desligado";
-+                const char* items[] = {fullscreen_label, fps_label, "Reiniciar jogo", "Fechar jogo"};
-+                for (int index = 0; index < 4; ++index) {
++                const char* resolution_label = port_menu_resolution_labels[port_menu_resolution];
++                const char* fsr_label = port_menu_fsr ? "FSR 1: ligado" : "FSR 1: desligado";
++                const char* items[] = {fullscreen_label, fps_label, resolution_label, fsr_label,
++                                       "Reiniciar jogo", "Fechar jogo"};
++                for (int index = 0; index < 6; ++index) {
 +                    if (Selectable(items[index], port_menu_selection == index, 0, ImVec2(0.0f, 40.0f))) {
 +                        port_menu_selection = index;
 +                        if (index == 0) {
@@ -104,10 +128,21 @@ index da64436f..006dcbd3 100644
 +                            event.type = SDL_EVENT_TOGGLE_FULLSCREEN;
 +                            SDL_PushEvent(&event);
 +                            port_menu_fullscreen = !port_menu_fullscreen;
-+                        } else if (index == 1) Overlay::ToggleSimpleFps();
-+                        else {
++                        } else if (index == 1) {
++                            Overlay::ToggleSimpleFps();
++                        } else if (index == 2) {
++                            port_menu_resolution = (port_menu_resolution + 1) % 4;
++                            if (presenter) {
++                                SDL_SetWindowSize(presenter->GetWindow().GetSDLWindow(),
++                                                  port_menu_resolution_sizes[port_menu_resolution][0],
++                                                  port_menu_resolution_sizes[port_menu_resolution][1]);
++                            }
++                        } else if (index == 3) {
++                            port_menu_fsr = !port_menu_fsr;
++                            if (presenter) presenter->GetFsrSettingsRef().enable = port_menu_fsr;
++                        } else {
 +                            show_port_menu = false;
-+                            NBA16_RequestMenuAction(index - 1);
++                            NBA16_RequestMenuAction(index - 3);
 +                        }
 +                    }
 +                }
@@ -122,7 +157,7 @@ index da64436f..006dcbd3 100644
      if (DebugState.IsShowingDebugMenuBar()) {
          PushFont(io.Fonts->Fonts[IMGUI_FONT_MONO]);
          PushID("DevtoolsLayer");
-@@ -531,6 +608,17 @@ void ToggleSimpleFps() {
+@@ -531,6 +642,30 @@ void ToggleSimpleFps() {
      visibility_toggled = true;
  }
  
@@ -133,6 +168,19 @@ index da64436f..006dcbd3 100644
 +    if (show_port_menu) {
 +        SDL_Window* window = SDL_GetKeyboardFocus();
 +        port_menu_fullscreen = window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
++        if (presenter) {
++            int width = 0;
++            int height = 0;
++            SDL_GetWindowSize(presenter->GetWindow().GetSDLWindow(), &width, &height);
++            for (int index = 0; index < 4; ++index) {
++                if (port_menu_resolution_sizes[index][0] == width &&
++                    port_menu_resolution_sizes[index][1] == height) {
++                    port_menu_resolution = index;
++                    break;
++                }
++            }
++            port_menu_fsr = presenter->GetFsrSettingsRef().enable;
++        }
 +    }
 +}
 +#endif
@@ -152,7 +200,7 @@ index d5fe0337..6f725465 100644
 +void TogglePortMenu();
  void ToggleQuitWindow();
  void ShowVolume();
- 
+
 diff --git a/src/core/emulator_settings.h b/src/core/emulator_settings.h
 index 231cbc71..8440ae9f 100644
 --- a/src/core/emulator_settings.h

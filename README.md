@@ -2,7 +2,7 @@
 
 Projeto comunitário de estudo para executar uma cópia legítima de NBA LIVE 16 no Windows. O runtime desta versão é integrado ao shadPS4; este projeto não contém o jogo nem substitui a necessidade do dump do usuário.
 
-**Versão em preparação:** V1.00-b (beta)
+**Versão:** V1.00-C
 
 ## Requisitos
 
@@ -14,6 +14,16 @@ Projeto comunitário de estudo para executar uma cópia legítima de NBA LIVE 16
 ## Executar
 
 Extraia o arquivo do Release para uma pasta gravável, abra `Court 16 Launcher.exe` e selecione a pasta do dump. A primeira execução criará as configurações locais. Consulte `LEIA-ME.txt` e `user/sys_modules/LEIA-ME-MODULOS.txt` no pacote.
+
+## Menu durante o jogo
+
+- Abra o menu pelo botão central PS/Guide do controle, ou mantenha Start e Select/Back pressionados juntos por 2 segundos.
+- Use o direcional para escolher; X/A confirma e Círculo/B volta.
+- No menu, alterne a exibição de FPS e o FSR 1. A opção de resolução alterna o tamanho de saída da janela entre 720p, 1080p, 1440p e 4K.
+
+## Atualização V1.00-C
+
+O menu do jogo foi ampliado e recebeu controles para resolução da janela e ativação/desativação do FSR 1 durante a partida.
 
 ## Compilar
 

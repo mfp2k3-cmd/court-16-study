@@ -1,0 +1,330 @@
+diff --git a/src/core/devtools/layer.cpp b/src/core/devtools/layer.cpp
+index da64436f..006dcbd3 100644
+--- a/src/core/devtools/layer.cpp
++++ b/src/core/devtools/layer.cpp
+@@ -4,6 +4,7 @@
+ #include "layer.h"
+ 
+ #include <SDL3/SDL_events.h>
++#include <SDL3/SDL_video.h>
+ #include <imgui.h>
+ 
+ #include "SDL3/SDL_log.h"
+@@ -14,6 +15,7 @@
+ #include "core/emulator_state.h"
+ #include "imgui/imgui_std.h"
+ #include "imgui_internal.h"
++#include "input/input_handler.h"
+ #include "options.h"
+ #include "video_core/renderer_vulkan/vk_presenter.h"
+ #include "widget/frame_dump.h"
+@@ -23,6 +25,10 @@
+ #include "widget/module_list.h"
+ #include "widget/shader_list.h"
+ 
++#if defined(NBA16_EMBEDDED_PORT)
++extern "C" void NBA16_RequestMenuAction(int action);
++#endif
++
+ extern std::unique_ptr<Vulkan::Presenter> presenter;
+ 
+ using namespace ImGui;
+@@ -33,6 +39,11 @@ static bool show_simple_fps = false;
+ static bool visibility_toggled = false;
+ static bool fps_pinned = false;
+ static bool show_quit_window = false;
++#if defined(NBA16_EMBEDDED_PORT)
++static bool show_port_menu = false;
++static int port_menu_selection = 0;
++static bool port_menu_fullscreen = false;
++#endif
+ 
+ static bool show_volume = false;
+ static float volume_start_time;
+@@ -387,7 +398,11 @@ void L::SetupSettings() {
+ }
+ 
+ bool L::ShouldKeepDrawing() {
++#if defined(NBA16_EMBEDDED_PORT)
++    return DebugState.IsShowingDebugMenuBar() || show_port_menu;
++#else
+     return DebugState.IsShowingDebugMenuBar();
++#endif
+ }
+ 
+ void L::Draw() {
+@@ -454,6 +469,68 @@ void L::Draw() {
+         End();
+     }
+ 
++#if defined(NBA16_EMBEDDED_PORT)
++    if (show_port_menu) {
++        if (IsKeyPressed(ImGuiKey_Escape, false) || IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
++            Overlay::TogglePortMenu();
++        } else {
++            if (IsKeyPressed(ImGuiKey_GamepadDpadUp, false) || IsKeyPressed(ImGuiKey_UpArrow, false))
++                port_menu_selection = (port_menu_selection + 3) % 4;
++            if (IsKeyPressed(ImGuiKey_GamepadDpadDown, false) || IsKeyPressed(ImGuiKey_DownArrow, false))
++                port_menu_selection = (port_menu_selection + 1) % 4;
++            if (IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || IsKeyPressed(ImGuiKey_Enter, false)) {
++                if (port_menu_selection == 0) {
++                    SDL_Event event{};
++                    event.type = SDL_EVENT_TOGGLE_FULLSCREEN;
++                    SDL_PushEvent(&event);
++                    port_menu_fullscreen = !port_menu_fullscreen;
++                } else if (port_menu_selection == 1) {
++                    Overlay::ToggleSimpleFps();
++                } else {
++                    show_port_menu = false;
++                    NBA16_RequestMenuAction(port_menu_selection - 1);
++                }
++            }
++
++            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
++            ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
++            ImGui::SetNextWindowSize(ImVec2(420.0f, 300.0f), ImGuiCond_Always);
++            ImGui::SetNextWindowFocus();
++            ImGui::SetNextWindowBgAlpha(0.96f);
++            if (Begin("NBA LIVE 16 — Menu do jogo", nullptr,
++                      ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse |
++                          ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
++                          ImGuiWindowFlags_NoDocking)) {
++                SetWindowFontScale(1.25f);
++                Overlay::TextCentered("MENU DO JOGO");
++                SetWindowFontScale(1.0f);
++                Spacing();
++                const char* fullscreen_label = port_menu_fullscreen ? "Mudar para modo janela" : "Mudar para tela cheia";
++                const char* fps_label = show_simple_fps ? "Contador de FPS: ligado" : "Contador de FPS: desligado";
++                const char* items[] = {fullscreen_label, fps_label, "Reiniciar jogo", "Fechar jogo"};
++                for (int index = 0; index < 4; ++index) {
++                    if (Selectable(items[index], port_menu_selection == index, 0, ImVec2(0.0f, 40.0f))) {
++                        port_menu_selection = index;
++                        if (index == 0) {
++                            SDL_Event event{};
++                            event.type = SDL_EVENT_TOGGLE_FULLSCREEN;
++                            SDL_PushEvent(&event);
++                            port_menu_fullscreen = !port_menu_fullscreen;
++                        } else if (index == 1) Overlay::ToggleSimpleFps();
++                        else {
++                            show_port_menu = false;
++                            NBA16_RequestMenuAction(index - 1);
++                        }
++                    }
++                }
++                Spacing();
++                TextDisabled("Direcional: escolher   ✕/A: confirmar   ◯/B: voltar");
++            }
++            End();
++        }
++    }
++#endif
++
+     if (DebugState.IsShowingDebugMenuBar()) {
+         PushFont(io.Fonts->Fonts[IMGUI_FONT_MONO]);
+         PushID("DevtoolsLayer");
+@@ -531,6 +608,17 @@ void ToggleSimpleFps() {
+     visibility_toggled = true;
+ }
+ 
++#if defined(NBA16_EMBEDDED_PORT)
++void TogglePortMenu() {
++    show_port_menu = !show_port_menu;
++    port_menu_selection = 0;
++    if (show_port_menu) {
++        SDL_Window* window = SDL_GetKeyboardFocus();
++        port_menu_fullscreen = window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
++    }
++}
++#endif
++
+ void SetSimpleFps(bool enabled) {
+     show_simple_fps = enabled;
+     visibility_toggled = true;
+
+diff --git a/src/core/devtools/layer.h b/src/core/devtools/layer.h
+index d5fe0337..6f725465 100644
+--- a/src/core/devtools/layer.h
++++ b/src/core/devtools/layer.h
+@@ -30,6 +30,7 @@ namespace Overlay {
+ 
+ void ToggleSimpleFps();
+ void SetSimpleFps(bool enabled);
++void TogglePortMenu();
+ void ToggleQuitWindow();
+ void ShowVolume();
+ 
+diff --git a/src/core/emulator_settings.h b/src/core/emulator_settings.h
+index 231cbc71..8440ae9f 100644
+--- a/src/core/emulator_settings.h
++++ b/src/core/emulator_settings.h
+@@ -204,6 +204,7 @@ struct GeneralSettings {
+         return std::vector<OverrideItem>{
+             make_override<GeneralSettings>("volume_slider", &GeneralSettings::volume_slider),
+             make_override<GeneralSettings>("neo_mode", &GeneralSettings::neo_mode),
++            make_override<GeneralSettings>("show_fps_counter", &GeneralSettings::show_fps_counter),
+             make_override<GeneralSettings>("dev_kit_mode", &GeneralSettings::dev_kit_mode),
+             make_override<GeneralSettings>("extra_dmem_in_mbytes",
+                                            &GeneralSettings::extra_dmem_in_mbytes),
+diff --git a/src/emulator.cpp b/src/emulator.cpp
+index 355458a7..529f0722 100644
+--- a/src/emulator.cpp
++++ b/src/emulator.cpp
+@@ -577,6 +577,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
+     game_info.trophy_index_map =
+         ExtractTrophies("/app0/sce_sys/npbind.dat", "/app0/sce_sys/trophy");
+ 
++#ifdef NBA16_EMBEDDED_PORT
++    const std::string window_title = "NBA LIVE 16";
++#else
+     std::string game_title = fmt::format("{} - {} <{}>", id, title, app_version);
+     std::string window_title = "";
+     std::string remote_url(Common::g_scm_remote_url);
+@@ -597,6 +600,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
+                                        Common::g_scm_branch, Common::g_scm_desc, game_title);
+         }
+     }
++#endif
+     window = std::make_unique<Frontend::WindowSDL>(EmulatorSettings.GetWindowWidth(),
+                                                    EmulatorSettings.GetWindowHeight(), controllers,
+                                                    window_title);
+@@ -712,7 +716,11 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
+         window->WaitEvent();
+     }
+ 
++#ifdef NBA16_EMBEDDED_PORT
++    return;
++#else
+     std::quick_exit(0);
++#endif
+ }
+ 
+ void Emulator::Restart(std::filesystem::path eboot_path,
+diff --git a/src/sdl_window.cpp b/src/sdl_window.cpp
+index a7d36502..2a67811d 100644
+--- a/src/sdl_window.cpp
++++ b/src/sdl_window.cpp
+@@ -10,6 +10,18 @@
+ #include <cmrc/cmrc.hpp>
+ #include <stb_image.h>
+ 
++#if defined(NBA16_EMBEDDED_PORT) && defined(_WIN32)
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#ifndef WIN32_LEAN_AND_MEAN
++#define WIN32_LEAN_AND_MEAN
++#endif
++#include <windows.h>
++#include <array>
++#include <filesystem>
++#endif
++
+ #include "common/assert.h"
+ #include "common/elf_info.h"
+ #include "common/io_file.h"
+@@ -43,6 +55,43 @@ namespace Frontend {
+ 
+ using namespace Libraries::Pad;
+ 
++#if defined(NBA16_EMBEDDED_PORT)
++namespace {
++bool nba16_start_down = false;
++bool nba16_select_down = false;
++bool nba16_menu_combo_fired = false;
++Uint64 nba16_menu_combo_started = 0;
++
++bool HandleNBA16MenuHotkey(const SDL_Event& event) {
++    if (event.type != SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
++        event.type != SDL_EVENT_GAMEPAD_BUTTON_UP) return false;
++    const bool pressed = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
++    const auto button = event.gbutton.button;
++    if (button == SDL_GAMEPAD_BUTTON_GUIDE) {
++        if (pressed) Overlay::TogglePortMenu();
++        return true;
++    }
++    if (button == SDL_GAMEPAD_BUTTON_START) nba16_start_down = pressed;
++    if (button == SDL_GAMEPAD_BUTTON_BACK) nba16_select_down = pressed;
++    if (nba16_start_down && nba16_select_down) {
++        if (nba16_menu_combo_started == 0) nba16_menu_combo_started = SDL_GetTicks();
++    } else {
++        nba16_menu_combo_started = 0;
++        nba16_menu_combo_fired = false;
++    }
++    return false;
++}
++
++void CheckNBA16MenuCombo() {
++    if (nba16_start_down && nba16_select_down && !nba16_menu_combo_fired &&
++        nba16_menu_combo_started != 0 && SDL_GetTicks() - nba16_menu_combo_started >= 2000) {
++        nba16_menu_combo_fired = true;
++        Overlay::TogglePortMenu();
++    }
++}
++} // namespace
++#endif
++
+ static OrbisPadButtonDataOffset SDLGamepadToOrbisButton(u8 button) {
+     using OPBDO = OrbisPadButtonDataOffset;
+ 
+@@ -193,21 +242,60 @@ WindowSDL::WindowSDL(s32 width_, s32 height_, Input::GameControllers* controller
+ WindowSDL::~WindowSDL() = default;
+ 
+ void WindowSDL::SetIcon(std::span<const u8> png_data) {
++#if defined(NBA16_EMBEDDED_PORT) && defined(_WIN32)
++    static HICON nba16_icon{};
++    if (!nba16_icon) {
++        std::array<wchar_t, 32768> executable_path{};
++        const DWORD path_length = GetModuleFileNameW(nullptr, executable_path.data(),
++                                                     static_cast<DWORD>(executable_path.size()));
++        if (path_length > 0 && path_length < executable_path.size()) {
++            const std::filesystem::path icon_path =
++                std::filesystem::path(std::wstring(executable_path.data(), path_length))
++                    .parent_path() / L"assets" / L"nba-live16.ico";
++            nba16_icon = static_cast<HICON>(LoadImageW(nullptr, icon_path.c_str(), IMAGE_ICON, 0, 0,
++                                                       LR_LOADFROMFILE | LR_DEFAULTSIZE));
++        }
++    }
++    if (png_data.empty()) {
++        SetDefaultWindowIcon(window);
++    } else {
++        SetWindowIcon(window, std::vector<u8>(png_data.begin(), png_data.end()));
++    }
++    if (nba16_icon) {
++        const HWND hwnd = static_cast<HWND>(SDL_GetPointerProperty(
++            SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
++        if (hwnd) {
++            SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(nba16_icon));
++            SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(nba16_icon));
++            SetClassLongPtrW(hwnd, GCLP_HICON, reinterpret_cast<LONG_PTR>(nba16_icon));
++            SetClassLongPtrW(hwnd, GCLP_HICONSM, reinterpret_cast<LONG_PTR>(nba16_icon));
++        }
++    }
++    return;
++#else
+     if (png_data.empty()) {
+         LOG_WARNING(Core, "No window icon data available, using default icon.");
+         SetDefaultWindowIcon(window);
+         return;
+     }
+     SetWindowIcon(window, std::vector<u8>(png_data.begin(), png_data.end()));
++#endif
+ }
+ 
+ void WindowSDL::WaitEvent() {
+     // Called on main thread
+     SDL_Event event;
+-
++#if defined(NBA16_EMBEDDED_PORT)
++    const bool event_available = SDL_WaitEventTimeout(&event, 50);
++    CheckNBA16MenuCombo();
++    if (!event_available) return;
++    if (HandleNBA16MenuHotkey(event)) return;
++    CheckNBA16MenuCombo();
++#else
+     if (!SDL_WaitEvent(&event)) {
+         return;
+     }
++#endif
+ 
+     if (Libraries::Mouse::PushSDLEvent(event) || Libraries::Keyboard::PushSDLEvent(event)) {
+         return;

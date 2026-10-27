@@ -1,0 +1,29 @@
+# Build products and local build caches
+/build/
+/out/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/build.ninja
+**/.ninja_*
+
+# Local game data and firmware: never commit these
+**/user/
+**/savedata/
+**/save_data/
+**/sys_modules/
+**/keys/
+**/*.prx
+**/*.sprx
+**/*.elf
+**/*.sav
+**/*.dmp
+**/*.log
+**/launcher.ini
+**/config.ini
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

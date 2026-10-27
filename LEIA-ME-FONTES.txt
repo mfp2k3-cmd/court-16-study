@@ -1,0 +1,13 @@
+NBA LIVE 16 — FONTES CORRESPONDENTES À BUILD
+
+A build distribuída usa o runtime shadPS4 no Windows, compilado a partir do commit 2cdefaa1298c6e4ece6c74bd84e90f3906282d51, com os patches locais listados em patches/shadps4. Este pacote contém o snapshot completo e os submódulos fixados por esse commit, além do código do launcher e da integração em src/ e dos assets usados para compilá-lo. Esta build ainda depende do runtime shadPS4; as ferramentas independentes em desenvolvimento não substituem esse runtime.
+
+Para compilar no Windows, instale MSYS2 CLANG64 com Clang/Clang++, CMake, Ninja, pkg-config, SDL3 e as bibliotecas Vulkan de desenvolvimento. Abra PowerShell e execute:
+
+  .\PREPARAR-E-COMPILAR.ps1
+
+O script usa o snapshot incluído, confere os submódulos, configura o projeto e compila o launcher junto com o runtime. Se o snapshot tiver sido removido, o script baixa o mesmo commit fixado e seus submódulos. A saída fica em build/nba16-prerelease-20261025-win/shadPS4-runtime.
+
+O código-base shadPS4 está sob GPL-2.0-or-later. Os patches e avisos correspondentes estão incluídos aqui; os avisos de dependências e licenças de runtime estão em LICENSES/ e THIRD-PARTY-NOTICES.txt. Para uma publicação binária, disponibilize este pacote de fontes junto à mesma versão da build e mantenha os avisos aplicáveis.
+
+A revisão pública de marcas, imagens e direitos de distribuição ainda está pendente. Preparar as fontes localmente não significa que a build esteja pronta para publicação pública.

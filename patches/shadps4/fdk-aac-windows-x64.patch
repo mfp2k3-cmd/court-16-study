@@ -1,0 +1,13 @@
+diff --git a/libFDK/include/common_fix.h b/libFDK/include/common_fix.h
+index 8d0dfde33a134db8ef15ad401123372875305079..0519f501cc8ffeece3600b823409fbf55e096b5b 100644
+--- a/libFDK/include/common_fix.h
++++ b/libFDK/include/common_fix.h
+@@ -406,7 +406,7 @@ FDK_INLINE FIXP_SGL fMax(FIXP_SGL a, FIXP_SGL b) { return fixmax_S(a, b); }
+ #if !defined(__LP64__)
+ FDK_INLINE INT fMax(INT a, INT b) { return fixmax_I(a, b); }
+ FDK_INLINE INT fMin(INT a, INT b) { return fixmin_I(a, b); }
+-#if !defined(_MSC_VER) && defined(__x86_64__)
++#if !defined(_MSC_VER) && defined(__x86_64__) && !defined(_WIN64)
+ FDK_INLINE SHORT fMax(SHORT a, SHORT b) { return fixmax_S(a, b); }
+ FDK_INLINE SHORT fMin(SHORT a, SHORT b) { return fixmin_S(a, b); }
+ #endif

@@ -1,0 +1,777 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d933af56..a6dbd043 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -40,6 +40,7 @@ option(ENABLE_DISCORD_RPC "Enable the Discord RPC integration" ON)
+ option(ENABLE_UPDATER "Enables the options to updater" ON)
+ option(ENABLE_TESTS "Build unit tests (requires GTest)" OFF)
+ option(ENABLE_SYSTEM_LIBRARIES "Enable building against system libraries" OFF)
++option(NBA16_BUILD_REUSABLE_CORE "Build the GPL core as a library for the NBA LIVE 16 host" OFF)
+ 
+ # First, determine whether to use CMAKE_OSX_ARCHITECTURES or CMAKE_SYSTEM_PROCESSOR.
+ if (APPLE AND CMAKE_OSX_ARCHITECTURES)
+@@ -1322,6 +1323,82 @@ endif()
+ 
+ if(NOT ENABLE_TESTS)
+ 
++if(NBA16_BUILD_REUSABLE_CORE)
++    if(NOT NBA16_HOST_SOURCE_DIR)
++        message(FATAL_ERROR "NBA16_HOST_SOURCE_DIR is required for NBA host integration")
++    endif()
++    # Keep the emulator entry points out of this archive. The native NBA host
++    # supplies its own lifecycle and window while reusing the upstream core.
++    add_library(nba16-shadps4-core STATIC
++        ${AUDIO_CORE}
++        ${IMGUI}
++        ${INPUT}
++        ${COMMON}
++        ${CORE}
++        ${EMULATOR}
++        ${SHADER_RECOMPILER}
++        ${VIDEO_CORE}
++        ${SHADNET}
++        "${NBA16_HOST_SOURCE_DIR}/src/shadps4_direct_memory_bridge.cpp"
++    )
++
++    if(APPLE)
++        target_sources(nba16-shadps4-core PRIVATE src/sdl_window_apple.mm)
++    endif()
++
++    create_target_directory_groups(nba16-shadps4-core)
++    target_link_libraries(nba16-shadps4-core PUBLIC spdlog::spdlog)
++    target_link_libraries(nba16-shadps4-core PUBLIC magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak::xbyak Tracy::TracyClient RenderDoc::API FFmpeg::ffmpeg Dear_ImGui ImGuiFileDialog gcn half::half ZLIB::ZLIB PNG::PNG minimp3 dr_flac)
++    target_link_libraries(nba16-shadps4-core PUBLIC Boost::headers GPUOpen::VulkanMemoryAllocator LibAtrac9 sirit Vulkan::Headers xxHash::xxhash Zydis::Zydis SDL3::SDL3 pugixml::pugixml)
++    target_link_libraries(nba16-shadps4-core PUBLIC stb::headers lfreist-hwinfo::hwinfo nlohmann_json::nlohmann_json miniz::miniz fdk-aac OpenAL::OpenAL Cpp_Httplib miniupnpc::miniupnpc)
++    target_link_libraries(nba16-shadps4-core PUBLIC Freetype::Freetype libprotobuf ZArchive::zarchive)
++    target_include_directories(nba16-shadps4-core PUBLIC "${SHADNET_PROTO_OUT}")
++    target_include_directories(nba16-shadps4-core PRIVATE "${NBA16_HOST_SOURCE_DIR}/src")
++    target_compile_definitions(nba16-shadps4-core PRIVATE IMGUI_USER_CONFIG="imgui/imgui_config.h")
++        target_compile_definitions(nba16-shadps4-core PRIVATE NBA16_EMBEDDED_PORT=1)
++
++    if(WIN32)
++        add_executable(nba16-port WIN32
++            "${NBA16_HOST_SOURCE_DIR}/src/nba16_embedded_host_main.cpp"
++        )
++        target_link_libraries(nba16-port PRIVATE nba16-shadps4-core)
++        target_include_directories(nba16-port PRIVATE
++            "${CMAKE_CURRENT_SOURCE_DIR}"
++            "${NBA16_HOST_SOURCE_DIR}/src"
++            "${SHADNET_PROTO_OUT}"
++        )
++        target_compile_features(nba16-port PRIVATE cxx_std_20)
++        set_target_properties(nba16-port PROPERTIES OUTPUT_NAME "NBA LIVE 16")
++
++        get_filename_component(NBA16_TOOLCHAIN_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
++        foreach(NBA16_RUNTIME_DLL IN ITEMS libc++.dll libwinpthread-1.dll)
++            set(NBA16_RUNTIME_DLL_PATH "${NBA16_TOOLCHAIN_BIN}/${NBA16_RUNTIME_DLL}")
++            if(EXISTS "${NBA16_RUNTIME_DLL_PATH}")
++                add_custom_command(TARGET nba16-port POST_BUILD
++                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
++                        "${NBA16_RUNTIME_DLL_PATH}" "$<TARGET_FILE_DIR:nba16-port>"
++                    VERBATIM
++                )
++            endif()
++        endforeach()
++    endif()
++
++    if(${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
++        target_link_libraries(nba16-shadps4-core PUBLIC "/usr/lib/libusb.so")
++    else()
++        target_link_libraries(nba16-shadps4-core PUBLIC libusb::usb)
++    endif()
++
++    if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
++        target_link_libraries(nba16-shadps4-core PUBLIC uuid)
++    endif()
++    if(WIN32)
++        target_link_libraries(nba16-shadps4-core PUBLIC mincore wepoll wbemuuid)
++    elseif(APPLE OR ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD")
++        target_link_libraries(nba16-shadps4-core PUBLIC date::date-tz epoll-shim)
++    endif()
++endif()
++
+ add_executable(shadps4
+     ${AUDIO_CORE}
+     ${IMGUI}
+@@ -1473,6 +1550,13 @@ set(HOST_SHADERS_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/src/video_core/host_shaders
+ add_subdirectory(${HOST_SHADERS_INCLUDE})
+ add_dependencies(shadps4 host_shaders)
+ target_include_directories(shadps4 PRIVATE ${HOST_SHADERS_INCLUDE})
++if(TARGET nba16-shadps4-core)
++    add_dependencies(nba16-shadps4-core host_shaders)
++    target_include_directories(nba16-shadps4-core PRIVATE
++        ${CMAKE_CURRENT_SOURCE_DIR}
++        ${HOST_SHADERS_INCLUDE}
++    )
++endif()
+ 
+ # embed resources
+ 
+@@ -1497,11 +1581,18 @@ cmrc_add_resource_library(embedded-resources
+         src/resources/amd_rcp_index_table.bin.zstd
+         src/resources/amd_rsqrt_index_table.bin.zstd)
+ target_link_libraries(shadps4 PRIVATE res::embedded)
++if(TARGET nba16-shadps4-core)
++    target_link_libraries(nba16-shadps4-core PUBLIC res::embedded)
++endif()
+ 
+ # ImGui resources
+ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/src/imgui/renderer)
+ add_dependencies(shadps4 ImGui_Resources)
+ target_include_directories(shadps4 PRIVATE ${IMGUI_RESOURCES_INCLUDE})
++if(TARGET nba16-shadps4-core)
++    add_dependencies(nba16-shadps4-core ImGui_Resources)
++    target_include_directories(nba16-shadps4-core PRIVATE ${IMGUI_RESOURCES_INCLUDE})
++endif()
+ 
+ 
+ # Discord RPC
+diff --git a/externals/CMakeLists.txt b/externals/CMakeLists.txt
+index cbe9219f..59489d00 100644
+--- a/externals/CMakeLists.txt
++++ b/externals/CMakeLists.txt
+@@ -394,7 +394,11 @@ endif()
+ # protobuf
+ set(protobuf_BUILD_TESTS              OFF CACHE INTERNAL "")
+ set(protobuf_BUILD_EXAMPLES           OFF CACHE INTERNAL "")
+-set(protobuf_BUILD_PROTOC_BINARIES    ON  CACHE INTERNAL "")
++if(NBA16_PROTOC_EXECUTABLE)
++    set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE INTERNAL "" FORCE)
++else()
++    set(protobuf_BUILD_PROTOC_BINARIES ON CACHE INTERNAL "")
++endif()
+ set(protobuf_INSTALL                  OFF CACHE INTERNAL "")
+ set(protobuf_WITH_ZLIB                OFF CACHE INTERNAL "")
+ set(protobuf_BUILD_SHARED_LIBS        OFF CACHE INTERNAL "")
+@@ -404,6 +408,10 @@ if(MSVC)
+ set(protobuf_MSVC_STATIC_RUNTIME OFF CACHE BOOL "" FORCE)
+ endif()
+ add_subdirectory(protobuf EXCLUDE_FROM_ALL)
++if(NBA16_PROTOC_EXECUTABLE AND NOT TARGET protobuf::protoc)
++    add_executable(protobuf::protoc IMPORTED GLOBAL)
++    set_target_properties(protobuf::protoc PROPERTIES IMPORTED_LOCATION "${NBA16_PROTOC_EXECUTABLE}")
++endif()
+ 
+ if (NOT TARGET zstd::libzstd)
+     # zstd (dependency of ZArchive)
+diff --git a/src/common/elf_info.h b/src/common/elf_info.h
+index 69c2163c..0a67320b 100644
+--- a/src/common/elf_info.h
++++ b/src/common/elf_info.h
+@@ -6,6 +6,7 @@
+ #include <filesystem>
+ #include <string>
+ #include <string_view>
++#include <utility>
+ #include <vector>
+ 
+ #include <map>
+@@ -79,6 +80,27 @@ class ElfInfo {
+     std::map<s32, std::string> trophy_index_map{};
+ 
+ public:
++    // Initialize game metadata for an embedded host that does not use
++    // Core::Emulator::Run. The caller is responsible for reading these values
++    // from the game dump and doing so before kernel/HLE services are created.
++    void Initialize(std::string serial, std::string game_title, std::string app_version,
++                    u32 firmware, u32 raw_firmware, u32 compiled_sdk,
++                    PSFAttributes attributes, std::filesystem::path folder,
++                    std::vector<u8> splash = {}) {
++        game_serial = std::move(serial);
++        title = std::move(game_title);
++        app_ver = std::move(app_version);
++        firmware_ver = firmware;
++        raw_firmware_ver = raw_firmware;
++        sdk_ver = compiled_sdk;
++        psf_attributes = attributes;
++        game_folder = std::move(folder);
++        splash_data = std::move(splash);
++        npCommIds.clear();
++        trophy_index_map.clear();
++        initialized = true;
++    }
++
+     static constexpr u32 FW_100 = 0x1000000;
+     static constexpr u32 FW_150 = 0x1500000;
+     static constexpr u32 FW_160 = 0x1600000;
+diff --git a/src/common/io_file.cpp b/src/common/io_file.cpp
+index c6d5a323..0872dcd4 100644
+--- a/src/common/io_file.cpp
++++ b/src/common/io_file.cpp
+@@ -21,12 +21,15 @@
+ #include <unistd.h>
+ #endif
+ 
+-#ifdef _MSC_VER
+-#define fileno _fileno
++#ifdef _WIN32
+ #define fseeko _fseeki64
+ #define ftello _ftelli64
+ #endif
+ 
++#ifdef _MSC_VER
++#define fileno _fileno
++#endif
++
+ namespace Common::FS {
+ 
+ namespace fs = std::filesystem;
+diff --git a/src/core/file_sys/ifile.h b/src/core/file_sys/ifile.h
+index 786442e0..c09b0a74 100644
+--- a/src/core/file_sys/ifile.h
++++ b/src/core/file_sys/ifile.h
+@@ -6,6 +6,7 @@
+ #include <filesystem>
+ #include <functional>
+ #include <memory>
++#include <vector>
+ #include <optional>
+ #include <string>
+ #include <string_view>
+diff --git a/src/core/libraries/save_data/save_backup.cpp b/src/core/libraries/save_data/save_backup.cpp
+index 728acdb4..68ec68f6 100644
+--- a/src/core/libraries/save_data/save_backup.cpp
++++ b/src/core/libraries/save_data/save_backup.cpp
+@@ -2,6 +2,7 @@
+ // SPDX-License-Identifier: GPL-2.0-or-later
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <deque>
+ #include <mutex>
+ #include <ranges>
+@@ -290,4 +291,4 @@ void ClearProgress() {
+     g_backup_progress = 0;
+ }
+ 
+-} // namespace Libraries::SaveData::Backup
+\ No newline at end of file
++} // namespace Libraries::SaveData::Backup
+diff --git a/src/core/libraries/videoout/driver.cpp b/src/core/libraries/videoout/driver.cpp
+index 8d8d988a..897fdfdf 100644
+--- a/src/core/libraries/videoout/driver.cpp
++++ b/src/core/libraries/videoout/driver.cpp
+@@ -240,8 +240,23 @@ void VideoOutDriver::Flip(const Request& req) {
+     // Present the frame.
+     presenter->Present(req.frame);
+ 
+-    // Update flip status.
++    // Release the replaced buffer before publishing flip completion to the game.
++    // Otherwise a late label reset can clear the label for the next frame.
+     auto* port = req.port;
++    bool label_reset = false;
++    {
++        std::unique_lock lock{port->port_mutex};
++        if (port->prev_index != -1) {
++            port->buffer_labels[port->prev_index] = 0;
++            label_reset = true;
++        }
++        port->prev_index = req.index;
++    }
++    if (label_reset) {
++        port->SignalVoLabel();
++    }
++
++    // Update flip status.
+     {
+         std::unique_lock lock{port->port_mutex};
+         auto& flip_status = port->flip_status;
+@@ -268,13 +283,6 @@ void VideoOutDriver::Flip(const Request& req) {
+         }
+     }
+ 
+-    // Reset prev flip label
+-    if (port->prev_index != -1) {
+-        port->buffer_labels[port->prev_index] = 0;
+-        port->SignalVoLabel();
+-    }
+-    // save to prev buf index
+-    port->prev_index = req.index;
+ }
+ 
+ void VideoOutDriver::DrawBlankFrame() {
+@@ -315,6 +323,27 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
+     return true;
+ }
+ 
++VideoOutDriver::EopFlipResult VideoOutDriver::SubmitEopFlip(VideoOutPort* port, u32 index,
++                                                            s64 flip_arg) {
++    {
++        std::unique_lock lock{port->port_mutex};
++        if (index >= port->buffer_labels.size() || port->buffer_labels[index] != 1) {
++            return EopFlipResult::Stale;
++        }
++        if (port->flip_status.flip_pending_num > 16) {
++            LOG_ERROR(Lib_VideoOut, "Flip queue is full");
++            return EopFlipResult::QueueFull;
++        }
++
++        ++port->flip_status.gc_queue_num;
++        ++port->flip_status.flip_pending_num;
++        port->flip_status.submit_tsc = Libraries::Kernel::sceKernelReadTsc();
++    }
++
++    SubmitFlipInternal(port, static_cast<s32>(index), flip_arg, true);
++    return EopFlipResult::Submitted;
++}
++
+ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop) {
+     Vulkan::Frame* frame;
+     if (index == -1) {
+diff --git a/src/core/libraries/videoout/driver.h b/src/core/libraries/videoout/driver.h
+index ca2b6456..71cf1007 100644
+--- a/src/core/libraries/videoout/driver.h
++++ b/src/core/libraries/videoout/driver.h
+@@ -91,6 +91,8 @@ public:
+                               const BufferAttribute* attribute);
+ 
+     bool SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);
++    enum class EopFlipResult { Submitted, Stale, QueueFull };
++    EopFlipResult SubmitEopFlip(VideoOutPort* port, u32 index, s64 flip_arg);
+ 
+ private:
+     struct Request {
+diff --git a/src/core/libraries/videoout/video_out.cpp b/src/core/libraries/videoout/video_out.cpp
+index 1cf6d2a8..19d49ba0 100644
+--- a/src/core/libraries/videoout/video_out.cpp
++++ b/src/core/libraries/videoout/video_out.cpp
+@@ -351,9 +351,13 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, s64 flip_arg, voi
+     Platform::IrqC::Instance()->RegisterOnce(
+         Platform::InterruptId::GfxFlip, [=](Platform::InterruptId irq) {
+             ASSERT_MSG(irq == Platform::InterruptId::GfxFlip, "An unexpected IRQ occured");
+-            ASSERT_MSG(port->buffer_labels[buf_id] == 1, "Out of order flip IRQ");
+-            const auto result = driver->SubmitFlip(port, buf_id, flip_arg, true);
+-            ASSERT_MSG(result, "EOP flip submission failed");
++            const auto result = driver->SubmitEopFlip(port, buf_id, flip_arg);
++            if (result == VideoOutDriver::EopFlipResult::Stale) {
++                LOG_WARNING(Lib_VideoOut, "Out of order flip IRQ for buffer {} ignored", buf_id);
++                return;
++            }
++            ASSERT_MSG(result == VideoOutDriver::EopFlipResult::Submitted,
++                       "EOP flip submission failed");
+         });
+ 
+     return ORBIS_OK;
+diff --git a/src/core/signals.cpp b/src/core/signals.cpp
+index d79829e6..d1e5da32 100644
+--- a/src/core/signals.cpp
++++ b/src/core/signals.cpp
+@@ -13,6 +13,11 @@
+ #include "core/signals.h"
+ #include "emulator.h"
+ 
++#include <array>
++#include <cstdio>
++#include <cstring>
++#include <string_view>
++
+ #ifdef _WIN32
+ #include <windows.h>
+ static constexpr DWORD MS_VC_EXCEPTION = 0x406D1388;
+@@ -40,6 +45,355 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
+     if (pExp != nullptr && pExp->ExceptionRecord != nullptr) {
+         code = pExp->ExceptionRecord->ExceptionCode;
+         address = pExp->ExceptionRecord->ExceptionAddress;
++#if defined(NBA16_EMBEDDED_PORT)
++        if (code == EXCEPTION_ACCESS_VIOLATION &&
++            pExp->ExceptionRecord->NumberParameters >= 2 && pExp->ContextRecord != nullptr &&
++            pExp->ExceptionRecord->ExceptionInformation[1] == 0) {
++            const auto operation = pExp->ExceptionRecord->ExceptionInformation[0];
++            const auto fault_address = pExp->ExceptionRecord->ExceptionInformation[1];
++            constexpr char hex_digits[] = "0123456789abcdef";
++            std::array<u8, 48> code_bytes{};
++            SIZE_T code_bytes_read = 0;
++            const auto code_address = pExp->ContextRecord->Rip >= 16
++                                          ? pExp->ContextRecord->Rip - 16
++                                          : pExp->ContextRecord->Rip;
++            ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(code_address),
++                              code_bytes.data(), code_bytes.size(), &code_bytes_read);
++            std::array<char, 48 * 3> instruction_bytes{};
++            std::size_t instruction_length = 0;
++            for (std::size_t i = 0; i < code_bytes_read; ++i) {
++                const auto byte = code_bytes[i];
++                instruction_bytes[instruction_length++] = hex_digits[byte >> 4];
++                instruction_bytes[instruction_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < code_bytes_read) instruction_bytes[instruction_length++] = ' ';
++            }
++            std::array<u64, 12> stack_words{};
++            SIZE_T stack_bytes_read = 0;
++            ReadProcessMemory(GetCurrentProcess(),
++                              reinterpret_cast<const void*>(pExp->ContextRecord->Rsp),
++                              stack_words.data(), sizeof(stack_words), &stack_bytes_read);
++            std::array<char, 12 * 19> stack_trace{};
++            std::size_t stack_length = 0;
++            const auto stack_word_count = stack_bytes_read / sizeof(u64);
++            for (std::size_t i = 0; i < stack_word_count; ++i) {
++                const auto written = std::snprintf(stack_trace.data() + stack_length,
++                                                   stack_trace.size() - stack_length,
++                                                   "%s%llx", i == 0 ? "" : " ",
++                                                   static_cast<unsigned long long>(stack_words[i]));
++                if (written <= 0) break;
++                stack_length += static_cast<std::size_t>(written);
++                if (stack_length >= stack_trace.size()) break;
++            }
++            std::array<char, 8 * 24> frame_trace{};
++            std::size_t frame_length = 0;
++            std::array<u64, 8> frame_returns{};
++            u64 frame_pointer = pExp->ContextRecord->Rbp;
++            for (std::size_t frame = 0; frame < 8 && frame_pointer != 0; ++frame) {
++                std::array<u64, 2> frame_record{};
++                SIZE_T frame_bytes_read = 0;
++                if (!ReadProcessMemory(GetCurrentProcess(),
++                                       reinterpret_cast<const void*>(frame_pointer),
++                                       frame_record.data(), sizeof(frame_record), &frame_bytes_read) ||
++                    frame_bytes_read != sizeof(frame_record)) {
++                    break;
++                }
++                const auto written = std::snprintf(frame_trace.data() + frame_length,
++                                                   frame_trace.size() - frame_length,
++                                                   "%s%llx:%llx", frame == 0 ? "" : " ",
++                                                   static_cast<unsigned long long>(frame_pointer),
++                                                   static_cast<unsigned long long>(frame_record[1]));
++                if (written <= 0) break;
++                frame_length += static_cast<std::size_t>(written);
++                frame_returns[frame] = frame_record[1];
++                if (frame_length >= frame_trace.size() || frame_record[0] <= frame_pointer)
++                    break;
++                frame_pointer = frame_record[0];
++            }
++            std::array<u8, 48> caller_bytes{};
++            SIZE_T caller_bytes_read = 0;
++            const u64 caller_address = frame_returns[0];
++            if (caller_address >= 0x400000 && caller_address < 0x375c000) {
++                const auto address = caller_address >= 16 ? caller_address - 16 : caller_address;
++                ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address),
++                                  caller_bytes.data(), caller_bytes.size(), &caller_bytes_read);
++            }
++            std::array<char, 48 * 3> caller_instruction_bytes{};
++            std::size_t caller_instruction_length = 0;
++            for (std::size_t i = 0; i < caller_bytes_read; ++i) {
++                const auto byte = caller_bytes[i];
++                caller_instruction_bytes[caller_instruction_length++] = hex_digits[byte >> 4];
++                caller_instruction_bytes[caller_instruction_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < caller_bytes_read)
++                    caller_instruction_bytes[caller_instruction_length++] = ' ';
++            }
++            std::array<u8, 5> callsite_bytes{};
++            SIZE_T callsite_bytes_read = 0;
++            u64 call_target = 0;
++            std::array<u8, 0x540> function_bytes{};
++            SIZE_T function_bytes_read = 0;
++            if (caller_address >= 5 && ReadProcessMemory(
++                    GetCurrentProcess(), reinterpret_cast<const void*>(caller_address - 5),
++                    callsite_bytes.data(), callsite_bytes.size(), &callsite_bytes_read) &&
++                callsite_bytes_read == callsite_bytes.size() && callsite_bytes[0] == 0xe8) {
++                s32 relative_target{};
++                std::memcpy(&relative_target, callsite_bytes.data() + 1, sizeof(relative_target));
++                call_target = caller_address + static_cast<s64>(relative_target);
++                if (call_target >= 0x400000 && call_target < 0x375c000) {
++                    ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(call_target),
++                                      function_bytes.data(), function_bytes.size(),
++                                      &function_bytes_read);
++                }
++            }
++            std::array<char, 0x540 * 3> function_hex{};
++            std::size_t function_hex_length = 0;
++            for (std::size_t i = 0; i < function_bytes_read; ++i) {
++                const auto byte = function_bytes[i];
++                function_hex[function_hex_length++] = hex_digits[byte >> 4];
++                function_hex[function_hex_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < function_bytes_read) function_hex[function_hex_length++] = ' ';
++            }
++            u64 nearest_guest_call_target = 0;
++            std::array<u8, 0x120> callee_bytes{};
++            SIZE_T callee_bytes_read = 0;
++            for (std::size_t i = (code_bytes_read < 16 ? code_bytes_read : 16); i-- > 0;) {
++                if (code_bytes[i] != 0xe8 || i + 5 > code_bytes_read) continue;
++                s32 relative_target{};
++                std::memcpy(&relative_target, code_bytes.data() + i + 1, sizeof(relative_target));
++                nearest_guest_call_target = code_address + i + 5 + static_cast<s64>(relative_target);
++                if (nearest_guest_call_target >= 0x400000 && nearest_guest_call_target < 0x375c000) {
++                    ReadProcessMemory(GetCurrentProcess(),
++                                      reinterpret_cast<const void*>(nearest_guest_call_target),
++                                      callee_bytes.data(), callee_bytes.size(), &callee_bytes_read);
++                } else {
++                    nearest_guest_call_target = 0;
++                }
++                break;
++            }
++            std::array<char, 0x120 * 3> callee_hex{};
++            std::size_t callee_hex_length = 0;
++            for (std::size_t i = 0; i < callee_bytes_read; ++i) {
++                const auto byte = callee_bytes[i];
++                callee_hex[callee_hex_length++] = hex_digits[byte >> 4];
++                callee_hex[callee_hex_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < callee_bytes_read) callee_hex[callee_hex_length++] = ' ';
++            }
++            u64 service_slot = 0;
++            u64 service_object = 0;
++            u64 service_vtable = 0;
++            u64 service_method = 0;
++            u64 input_word0 = 0;
++            u32 input_word1 = 0;
++            u64 input_field_120 = 0;
++            std::array<u64, 20> input_object_words{};
++            std::array<u64, 16> input_vtable_words{};
++            std::array<char, 64> input_type_name{};
++            SIZE_T input_object_bytes_read = 0;
++            SIZE_T input_vtable_bytes_read = 0;
++            SIZE_T input_type_name_read = 0;
++            u64 input_type_info = 0;
++            u64 input_type_name_address = 0;
++            u64 output_value = 0;
++            std::array<u8, 0x300> service_method_bytes{};
++            SIZE_T service_method_bytes_read = 0;
++            std::array<u8, 32> input_data{};
++            SIZE_T input_data_read = 0;
++            SIZE_T diagnostic_bytes_read = 0;
++            if (callee_bytes_read >= 16 && callee_bytes[9] == 0x48 &&
++                callee_bytes[10] == 0x8d && callee_bytes[11] == 0x05) {
++                s32 global_displacement{};
++                std::memcpy(&global_displacement, callee_bytes.data() + 12,
++                            sizeof(global_displacement));
++                service_slot = nearest_guest_call_target + 16 +
++                               static_cast<s64>(global_displacement);
++                ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(service_slot),
++                                  &service_object, sizeof(service_object), &diagnostic_bytes_read);
++                if (diagnostic_bytes_read == sizeof(service_object) && service_object != 0) {
++                    ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(service_object),
++                                      &service_vtable, sizeof(service_vtable), &diagnostic_bytes_read);
++                    if (diagnostic_bytes_read == sizeof(service_vtable) && service_vtable != 0) {
++                        ReadProcessMemory(GetCurrentProcess(),
++                                          reinterpret_cast<const void*>(service_vtable + 48),
++                                          &service_method, sizeof(service_method),
++                                          &diagnostic_bytes_read);
++                    }
++                }
++            }
++            ReadProcessMemory(GetCurrentProcess(),
++                              reinterpret_cast<const void*>(pExp->ContextRecord->Rbx),
++                              &input_word0, sizeof(input_word0), &diagnostic_bytes_read);
++            ReadProcessMemory(GetCurrentProcess(),
++                              reinterpret_cast<const void*>(pExp->ContextRecord->Rbx + 8),
++                              &input_word1, sizeof(input_word1), &diagnostic_bytes_read);
++            if (input_word0 != 0) {
++                ReadProcessMemory(GetCurrentProcess(),
++                                  reinterpret_cast<const void*>(input_word0 + 120),
++                                  &input_field_120, sizeof(input_field_120),
++                                  &diagnostic_bytes_read);
++                ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(input_word0),
++                                  input_object_words.data(), sizeof(input_object_words),
++                                  &input_object_bytes_read);
++                if (input_object_words[0] >= 0x400000 && input_object_words[0] < 0x3bf0000) {
++                    ReadProcessMemory(GetCurrentProcess(),
++                                      reinterpret_cast<const void*>(input_object_words[0]),
++                                      input_vtable_words.data(), sizeof(input_vtable_words),
++                                      &input_vtable_bytes_read);
++                    ReadProcessMemory(GetCurrentProcess(),
++                                      reinterpret_cast<const void*>(input_object_words[0] - 8),
++                                      &input_type_info, sizeof(input_type_info),
++                                      &diagnostic_bytes_read);
++                    if (diagnostic_bytes_read == sizeof(input_type_info) && input_type_info != 0) {
++                        ReadProcessMemory(GetCurrentProcess(),
++                                          reinterpret_cast<const void*>(input_type_info + 8),
++                                          &input_type_name_address, sizeof(input_type_name_address),
++                                          &diagnostic_bytes_read);
++                        if (diagnostic_bytes_read == sizeof(input_type_name_address) &&
++                            input_type_name_address != 0) {
++                            ReadProcessMemory(GetCurrentProcess(),
++                                              reinterpret_cast<const void*>(input_type_name_address),
++                                              input_type_name.data(), input_type_name.size(),
++                                              &input_type_name_read);
++                        }
++                    }
++                }
++            }
++            if (input_word0 != 0 && input_word1 <= input_data.size()) {
++                ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(input_word0),
++                                  input_data.data(), input_word1, &input_data_read);
++            }
++            if (service_method >= 0x400000 && service_method < 0x375c000) {
++                ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(service_method),
++                                  service_method_bytes.data(), service_method_bytes.size(),
++                                  &service_method_bytes_read);
++            }
++            const auto output_address = pExp->ContextRecord->Rbp - 0xe8;
++            ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(output_address),
++                              &output_value, sizeof(output_value), &diagnostic_bytes_read);
++            std::array<char, 0x300 * 3> service_method_hex{};
++            std::size_t service_method_hex_length = 0;
++            for (std::size_t i = 0; i < service_method_bytes_read; ++i) {
++                const auto byte = service_method_bytes[i];
++                service_method_hex[service_method_hex_length++] = hex_digits[byte >> 4];
++                service_method_hex[service_method_hex_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < service_method_bytes_read)
++                    service_method_hex[service_method_hex_length++] = ' ';
++            }
++            std::array<char, 32 * 3> input_data_hex{};
++            std::size_t input_data_hex_length = 0;
++            for (std::size_t i = 0; i < input_data_read; ++i) {
++                const auto byte = input_data[i];
++                input_data_hex[input_data_hex_length++] = hex_digits[byte >> 4];
++                input_data_hex[input_data_hex_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < input_data_read) input_data_hex[input_data_hex_length++] = ' ';
++            }
++            u64 service_helper_target = 0;
++            std::array<u8, 0x180> service_helper_bytes{};
++            SIZE_T service_helper_bytes_read = 0;
++            if (input_word1 == 5 && service_method_bytes_read >= 0x106 &&
++                service_method_bytes[0x101] == 0xe8) {
++                s32 helper_displacement{};
++                std::memcpy(&helper_displacement, service_method_bytes.data() + 0x102,
++                            sizeof(helper_displacement));
++                service_helper_target = service_method + 0x106 +
++                                        static_cast<s64>(helper_displacement);
++                if (service_helper_target >= 0x400000 && service_helper_target < 0x375c000) {
++                    ReadProcessMemory(GetCurrentProcess(),
++                                      reinterpret_cast<const void*>(service_helper_target),
++                                      service_helper_bytes.data(), service_helper_bytes.size(),
++                                      &service_helper_bytes_read);
++                }
++            }
++            std::array<char, 0x180 * 3> service_helper_hex{};
++            std::size_t service_helper_hex_length = 0;
++            for (std::size_t i = 0; i < service_helper_bytes_read; ++i) {
++                const auto byte = service_helper_bytes[i];
++                service_helper_hex[service_helper_hex_length++] = hex_digits[byte >> 4];
++                service_helper_hex[service_helper_hex_length++] = hex_digits[byte & 0x0f];
++                if (i + 1 < service_helper_bytes_read)
++                    service_helper_hex[service_helper_hex_length++] = ' ';
++            }
++            std::array<char, 20 * 19> input_object_hex{};
++            std::size_t input_object_hex_length = 0;
++            const auto input_object_word_count = input_object_bytes_read / sizeof(u64);
++            for (std::size_t i = 0; i < input_object_word_count; ++i) {
++                const auto written = std::snprintf(input_object_hex.data() + input_object_hex_length,
++                                                   input_object_hex.size() - input_object_hex_length,
++                                                   "%s%llx", i == 0 ? "" : " ",
++                                                   static_cast<unsigned long long>(input_object_words[i]));
++                if (written <= 0) break;
++                input_object_hex_length += static_cast<std::size_t>(written);
++                if (input_object_hex_length >= input_object_hex.size()) break;
++            }
++            std::array<char, 16 * 19> input_vtable_hex{};
++            std::size_t input_vtable_hex_length = 0;
++            const auto input_vtable_word_count = input_vtable_bytes_read / sizeof(u64);
++            for (std::size_t i = 0; i < input_vtable_word_count; ++i) {
++                const auto written = std::snprintf(input_vtable_hex.data() + input_vtable_hex_length,
++                                                   input_vtable_hex.size() - input_vtable_hex_length,
++                                                   "%s%llx", i == 0 ? "" : " ",
++                                                   static_cast<unsigned long long>(input_vtable_words[i]));
++                if (written <= 0) break;
++                input_vtable_hex_length += static_cast<std::size_t>(written);
++                if (input_vtable_hex_length >= input_vtable_hex.size()) break;
++            }
++            const std::string_view type_name_view{input_type_name.data(), input_type_name_read};
++            const auto type_name_length = type_name_view.find('\0');
++            const char* operation_name = operation == 0 ? "read" :
++                                         operation == 1 ? "write" :
++                                         operation == 8 ? "execute" : "unknown access";
++            LOG_CRITICAL(Debug,
++                         "NBA port access violation: {} address {:#x}; guest RIP={:#x} RSP={:#x} "
++                         "RAX={:#x} RBX={:#x} RCX={:#x} RDX={:#x} RSI={:#x} RDI={:#x} "
++                         "R8={:#x} R9={:#x} R10={:#x} R11={:#x} R12={:#x} R13={:#x} "
++                         "R14={:#x} R15={:#x} RBP={:#x}; code[-16..+32]={}; "
++                         "stack[0..11]={}; frame_chain[rbp:ret]={}; "
++                         "first_frame_return={:#x} code[-16..+32]={}; "
++                         "direct_call_target={:#x} function_bytes={}; "
++                         "nearest_guest_call_target={:#x} callee_bytes={}; "
++                         "service_slot={:#x} service={:#x} vtable={:#x} method={:#x}; "
++                         "input=[{:#x},{:#x}] data={} field+120={:#x}; "
++                         "output@{:#x}={:#x}; method_code={}; "
++                         "service_helper={:#x} helper_code={}; object_words={}; vtable_words={}; "
++                         "typeinfo={:#x} type_name_ptr={:#x} name={}",
++                         operation_name, fault_address,
++                         static_cast<u64>(pExp->ContextRecord->Rip),
++                         static_cast<u64>(pExp->ContextRecord->Rsp),
++                         static_cast<u64>(pExp->ContextRecord->Rax),
++                         static_cast<u64>(pExp->ContextRecord->Rbx),
++                         static_cast<u64>(pExp->ContextRecord->Rcx),
++                         static_cast<u64>(pExp->ContextRecord->Rdx),
++                         static_cast<u64>(pExp->ContextRecord->Rsi),
++                         static_cast<u64>(pExp->ContextRecord->Rdi),
++                         static_cast<u64>(pExp->ContextRecord->R8),
++                         static_cast<u64>(pExp->ContextRecord->R9),
++                         static_cast<u64>(pExp->ContextRecord->R10),
++                         static_cast<u64>(pExp->ContextRecord->R11),
++                         static_cast<u64>(pExp->ContextRecord->R12),
++                         static_cast<u64>(pExp->ContextRecord->R13),
++                         static_cast<u64>(pExp->ContextRecord->R14),
++                         static_cast<u64>(pExp->ContextRecord->R15),
++                         static_cast<u64>(pExp->ContextRecord->Rbp),
++                         std::string_view{instruction_bytes.data(), instruction_length},
++                         std::string_view{stack_trace.data(), stack_length},
++                         std::string_view{frame_trace.data(), frame_length}, caller_address,
++                         std::string_view{caller_instruction_bytes.data(),
++                                          caller_instruction_length},
++                         call_target,
++                         std::string_view{function_hex.data(), function_hex_length},
++                         nearest_guest_call_target,
++                         std::string_view{callee_hex.data(), callee_hex_length},
++                         service_slot, service_object, service_vtable, service_method,
++                         input_word0, input_word1,
++                         std::string_view{input_data_hex.data(), input_data_hex_length},
++                         input_field_120, output_address, output_value,
++                         std::string_view{service_method_hex.data(), service_method_hex_length},
++                         service_helper_target,
++                         std::string_view{service_helper_hex.data(), service_helper_hex_length},
++                         std::string_view{input_object_hex.data(), input_object_hex_length},
++                         std::string_view{input_vtable_hex.data(), input_vtable_hex_length},
++                         input_type_info, input_type_name_address,
++                         type_name_view.substr(0, type_name_length));
++        }
++#endif
+     }
+ 
+     Ucontext guest_context{pExp->ContextRecord};
+@@ -139,6 +493,32 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
+         }
+     }
+ 
++#if defined(NBA16_EMBEDDED_PORT)
++    if (code == EXCEPTION_ACCESS_VIOLATION && pExp != nullptr &&
++        pExp->ExceptionRecord != nullptr && pExp->ExceptionRecord->NumberParameters >= 2 &&
++        pExp->ContextRecord != nullptr) {
++        const auto operation = pExp->ExceptionRecord->ExceptionInformation[0];
++        const auto fault_address = pExp->ExceptionRecord->ExceptionInformation[1];
++        const char* operation_name = operation == 0 ? "read" :
++                                     operation == 1 ? "write" :
++                                     operation == 8 ? "execute" : "unknown access";
++        LOG_CRITICAL(Debug,
++                     "NBA port unhandled access violation: {} address {:#x}; RIP={:#x} RSP={:#x} "
++                     "RAX={:#x} RBX={:#x} RCX={:#x} RDX={:#x} RSI={:#x} RDI={:#x} "
++                     "RBP={:#x}",
++                     operation_name, fault_address,
++                     static_cast<u64>(pExp->ContextRecord->Rip),
++                     static_cast<u64>(pExp->ContextRecord->Rsp),
++                     static_cast<u64>(pExp->ContextRecord->Rax),
++                     static_cast<u64>(pExp->ContextRecord->Rbx),
++                     static_cast<u64>(pExp->ContextRecord->Rcx),
++                     static_cast<u64>(pExp->ContextRecord->Rdx),
++                     static_cast<u64>(pExp->ContextRecord->Rsi),
++                     static_cast<u64>(pExp->ContextRecord->Rdi),
++                     static_cast<u64>(pExp->ContextRecord->Rbp));
++    }
++#endif
++
+     const bool report_unhandled =
+         use_static_windows_guest_red_zone_protection ? static_protection_exception : true;
+     if (report_unhandled) {
+diff --git a/src/core/user_manager.cpp b/src/core/user_manager.cpp
+index 069df972..f1d5ed7a 100644
+--- a/src/core/user_manager.cpp
++++ b/src/core/user_manager.cpp
+@@ -297,7 +297,13 @@ Users UserManager::CreateDefaultUsers() {
+             std::filesystem::create_directory(user_dir / "trophy");
+             std::filesystem::create_directory(user_dir / "inputs");
+             if (u.user_id == 1000) {
++#ifdef NBA16_EMBEDDED_PORT
++                // The standalone NBA port keeps its profile separate and must
++                // never prompt to import/move saves from another shadPS4 install.
++                constexpr TransferOption user_choice = TransferOption::Nothing;
++#else
+                 TransferOption user_choice = AskMigrationOption();
++#endif
+                 CheckAndMigrateSaves(user_choice);
+                 CheckAndMigrateTrophies(user_choice);
+             }

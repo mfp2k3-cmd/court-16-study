@@ -35,4 +35,7 @@ O runtime shadPS4 é distribuído sob GPL-2.0-or-later. Os patches deste projeto
 
 Projeto independente de estudo, sem afiliação, patrocínio ou aprovação da EA, NBA ou Sony. Os nomes dos jogos e plataformas identificam apenas a compatibilidade pretendida. O usuário deve fornecer seu próprio dump e arquivos de firmware.
 
+## Reconhecimento
+
+Os estudos de arquitetura, análise e evolução do código contaram com assistência do OpenAI Codex.
 

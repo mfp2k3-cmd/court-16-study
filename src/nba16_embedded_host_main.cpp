@@ -22,6 +22,7 @@
 #include "core/emulator_state.h"
 #include "core/ipc/ipc.h"
 #include "core/user_settings.h"
+#include "nba16_game_id.h"
 
 namespace {
 
@@ -109,6 +110,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
         if (!std::filesystem::is_directory(game_root) ||
             !std::filesystem::is_regular_file(game_root / L"eboot.bin")) {
             show_error(L"Não encontrei eboot.bin na pasta do dump do NBA LIVE 16.\n\n" +
+                       game_root.wstring());
+            return 1;
+        }
+        const auto title_id = NBA16::ReadTitleId(game_root);
+        if (!title_id || !NBA16::IsSupportedTitleId(*title_id)) {
+            show_error(L"Este port aceita somente dumps de NBA LIVE 16 (CUSA01933 ou CUSA01966).\n\n" +
                        game_root.wstring());
             return 1;
         }

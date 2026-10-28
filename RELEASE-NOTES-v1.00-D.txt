@@ -1,0 +1,21 @@
+COURT 16 — V1.00-D
+
+Novidades
+- Aceita dumps próprios de NBA LIVE 16 CUSA01933 e CUSA01966, conferindo o TITLE_ID em sce_sys/param.sfo.
+- A resolução interna agora pode ser definida como Automática (recomendada); a escolha manual permanece disponível.
+
+Como funciona a resolução automática
+A resolução de saída define o tamanho da janela/tela. A resolução interna define o tamanho usado para renderizar o jogo antes do upscaling. O modo automático usa:
+- Saída 720p: interna 720p.
+- Saída 1080p: interna 720p.
+- Saída 1440p: interna 1080p.
+- Saída 4K: interna 1440p.
+
+O FSR 1 pode ampliar a imagem quando a resolução interna for menor que a saída. Os resultados visuais e de desempenho dependem do jogo e do hardware.
+
+Requisitos
+- Windows x64 e GPU/driver compatíveis com Vulkan.
+- Dump próprio de NBA LIVE 16 CUSA01933 ou CUSA01966.
+- Módulos de firmware obtidos da própria instalação PS4. Eles não são incluídos no pacote.
+
+O pacote não inclui o dump do jogo, firmware, módulos, chaves, saves, perfis, configurações pessoais ou logs. Consulte LEIA-ME.txt, LICENSE, LICENSES e THIRD-PARTY-NOTICES.txt.

@@ -10,6 +10,8 @@
 #include <shobjidl.h>
 #include <gdiplus.h>
 
+#include "nba16_game_id.h"
+
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -32,6 +34,7 @@ constexpr int kResolution = 1101, kRefresh = 1102, kFullscreen = 1103, kProMode 
 constexpr int kSaveOptions = 1105, kRenderResolution = 1106, kFsrEnabled = 1107;
 constexpr int kUserProfile = 1108, kUserName = 1109, kCreateUser = 1110, kRenameUser = 1111;
 constexpr int kSaveUsers = 1112, kDeleteUser = 1113, kShowFps = 1114;
+constexpr int kAutomaticResolutionIndex = 4;
 
 struct Resolution { const wchar_t* label; unsigned width; unsigned height; };
 constexpr Resolution kResolutions[] = {
@@ -272,7 +275,8 @@ void load_preferences() {
     g_resolution_index = std::clamp(static_cast<int>(GetPrivateProfileIntW(L"Launcher", L"Resolution", 1,
                                            g_launcher_ini.c_str())), 0, 3);
     g_render_resolution_index = std::clamp(static_cast<int>(GetPrivateProfileIntW(
-        L"Launcher", L"RenderResolution", g_resolution_index, g_launcher_ini.c_str())), 0, 3);
+        L"Launcher", L"RenderResolution", kAutomaticResolutionIndex, g_launcher_ini.c_str())),
+        0, kAutomaticResolutionIndex);
     g_refresh_index = GetPrivateProfileIntW(L"Launcher", L"RefreshRate", 60,
                                              g_launcher_ini.c_str()) >= 120 ? 1 : 0;
     g_fullscreen_value = GetPrivateProfileIntW(L"Launcher", L"Fullscreen", 0,
@@ -323,7 +327,7 @@ void choose_game_folder() {
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return;
     DWORD options{}; dialog->GetOptions(&options);
     dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-    dialog->SetTitle(L"Selecione a pasta do dump CUSA01933");
+    dialog->SetTitle(L"Selecione o dump de NBA LIVE 16 (CUSA01933 ou CUSA01966)");
     if (SUCCEEDED(dialog->Show(g_window))) {
         IShellItem* item{};
         if (SUCCEEDED(dialog->GetResult(&item))) {
@@ -363,9 +367,11 @@ void open_save_folder() {
     ShellExecuteW(g_window, L"open", save_root.c_str(), nullptr, g_app_dir.c_str(), SW_SHOWNORMAL);
 }
 
-bool write_game_config(const std::filesystem::path& user_dir) {
+bool write_game_config(const std::filesystem::path& user_dir, const std::wstring& title_id) {
     const auto& output_resolution = kResolutions[g_resolution_index];
-    const auto& render_resolution = kResolutions[g_render_resolution_index];
+    const int render_index = g_render_resolution_index == kAutomaticResolutionIndex
+        ? std::max(0, g_resolution_index - 1) : g_render_resolution_index;
+    const auto& render_resolution = kResolutions[render_index];
     unsigned window_width = output_resolution.width;
     unsigned window_height = output_resolution.height;
     if (!g_fullscreen_value) {
@@ -381,7 +387,7 @@ bool write_game_config(const std::filesystem::path& user_dir) {
     }
     const auto config_dir = user_dir / L"custom_configs";
     std::error_code ec; std::filesystem::create_directories(config_dir, ec); if (ec) return false;
-    std::ofstream out(config_dir / L"CUSA01933.json", std::ios::binary | std::ios::trunc);
+    std::ofstream out(config_dir / (title_id + L".json"), std::ios::binary | std::ios::trunc);
     if (!out) return false;
     out << "{\n  \"General\": {\"neo_mode\": " << (g_pro_mode_value ? "true" : "false")
         << ", \"show_fps_counter\": " << (g_show_fps_value ? "true" : "false")
@@ -405,11 +411,16 @@ void launch_game() {
     if (!length || !std::filesystem::is_regular_file(game_path / L"eboot.bin", ec)) {
         update_status(L"A pasta selecionada não contém eboot.bin.", true); return;
     }
+    const auto title_id = NBA16::ReadTitleId(game_path);
+    if (!title_id || !NBA16::IsSupportedTitleId(*title_id)) {
+        update_status(L"Selecione um dump válido de NBA LIVE 16 (CUSA01933 ou CUSA01966).", true);
+        return;
+    }
     g_volume_value_saved = g_slider_value;
     save_preferences(game_path);
     const auto profile_base = selected_profile_base();
     const auto user_dir = profile_base / L"user";
-    if (!write_game_config(user_dir)) { update_status(L"Não foi possível gravar as opções do jogo.", true); return; }
+    if (!write_game_config(user_dir, *title_id)) { update_status(L"Não foi possível gravar as opções do jogo.", true); return; }
     const auto exe = g_app_dir / L"NBA LIVE 16.exe";
     if (!std::filesystem::is_regular_file(exe, ec)) { update_status(L"Não encontrei NBA LIVE 16.exe ao lado do launcher.", true); return; }
     const auto user_name = profile_name(g_selected_user_id);
@@ -435,6 +446,7 @@ void create_options_window() {
     make_control(g_options_window, 0, L"STATIC", L"Resolução interna", WS_CHILD | WS_VISIBLE, 28, 112, 190, 28, -1, g_font);
     g_render_resolution = make_control(g_options_window, 0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 230, 108, 300, 180, kRenderResolution, g_font);
     for (const auto& option : kResolutions) SendMessageW(g_render_resolution, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(option.label));
+    SendMessageW(g_render_resolution, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Automática (recomendada)"));
     g_fsr_enabled = make_control(g_options_window, 0, L"BUTTON", L"Ativar FSR 1 (EASU + nitidez)", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 28, 154, 360, 30, kFsrEnabled, g_font);
     make_control(g_options_window, 0, L"STATIC", L"Nitidez do FSR 1", WS_CHILD | WS_VISIBLE, 28, 194, 190, 28, -1, g_font);
     make_control(g_options_window, 0, L"STATIC", L"Sincronização de apresentação", WS_CHILD | WS_VISIBLE, 28, 248, 260, 28, -1, g_font);
@@ -446,7 +458,7 @@ void create_options_window() {
     g_show_fps = make_control(g_options_window, 0, L"BUTTON", L"Mostrar contador de FPS durante o jogo", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 28, 362, 430, 28, kShowFps, g_font);
     make_control(g_options_window, 0, L"STATIC", L"Volume do jogo", WS_CHILD | WS_VISIBLE, 28, 404, 190, 28, -1, g_font);
     make_control(g_options_window, 0, L"STATIC", L"A nitidez só tem efeito quando o FSR 1 está ativado.", WS_CHILD | WS_VISIBLE, 28, 498, 540, 28, -1, g_font);
-    make_control(g_options_window, 0, L"STATIC", L"FSR 1 amplia quando a resolução interna é menor que a de saída.", WS_CHILD | WS_VISIBLE, 28, 526, 540, 28, -1, g_font);
+    make_control(g_options_window, 0, L"STATIC", L"Automática: 720p→720p, 1080p→720p, 1440p→1080p e 4K→1440p.", WS_CHILD | WS_VISIBLE, 28, 526, 540, 28, -1, g_font);
     make_control(g_options_window, 0, L"BUTTON", L"Salvar e fechar", WS_CHILD | WS_VISIBLE | BS_OWNERDRAW, 365, 558, 165, 38, kSaveOptions, g_font);
 }
 
@@ -481,7 +493,8 @@ LRESULT CALLBACK options_window_proc(HWND window, UINT message, WPARAM wparam, L
     }
     if (message == WM_COMMAND && LOWORD(wparam) == kSaveOptions) {
         g_resolution_index = std::clamp(static_cast<int>(SendMessageW(g_resolution, CB_GETCURSEL, 0, 0)), 0, 3);
-        g_render_resolution_index = std::clamp(static_cast<int>(SendMessageW(g_render_resolution, CB_GETCURSEL, 0, 0)), 0, 3);
+        g_render_resolution_index = std::clamp(static_cast<int>(SendMessageW(g_render_resolution, CB_GETCURSEL, 0, 0)),
+                                                0, kAutomaticResolutionIndex);
         g_fsr_enabled_value = SendMessageW(g_fsr_enabled, BM_GETCHECK, 0, 0) == BST_CHECKED;
         g_refresh_index = SendMessageW(g_refresh, CB_GETCURSEL, 0, 0) == 1 ? 1 : 0;
         g_fullscreen_value = SendMessageW(g_fullscreen, BM_GETCHECK, 0, 0) == BST_CHECKED;
@@ -712,7 +725,7 @@ void paint_background(HWND window) {
         RECT r{x, q(top), x + q(width), q(top + 30)}; DrawTextW(hdc, text, -1, &r, flags | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     };
     draw_text(L"Projeto independente para Windows", 74, 500);
-    draw_text(L"Pasta do jogo (dump CUSA01933)", 132, 650);
+    draw_text(L"Pasta do jogo (dump NBA LIVE 16: CUSA01933 ou CUSA01966)", 132, 650);
     draw_text(L"Pasta-base dos saves", 226, 650);
     std::wstring used = L"Perfil: " + profile_name(g_selected_user_id) + L"  |  Saves: " + actual_save_path().wstring();
     draw_text(used.c_str(), 310, 510);

@@ -2,12 +2,12 @@
 
 Projeto comunitário de estudo para executar uma cópia legítima de NBA LIVE 16 no Windows. O runtime desta versão é integrado ao shadPS4; este projeto não contém o jogo nem substitui a necessidade do dump do usuário.
 
-**Versão:** V1.00-C
+**Versão:** V1.00-D
 
 ## Requisitos
 
 - Windows x64
-- Dump próprio de NBA LIVE 16, CUSA01933
+- Dump próprio de NBA LIVE 16: CUSA01933 ou CUSA01966
 - Módulos de firmware obtidos da própria instalação PS4, colocados em `user/sys_modules`
 - GPU e drivers compatíveis com Vulkan
 
@@ -21,9 +21,13 @@ Extraia o arquivo do Release para uma pasta gravável, abra `Court 16 Launcher.e
 - Use o direcional para escolher; X/A confirma e Círculo/B volta.
 - No menu, alterne a exibição de FPS e o FSR 1. A opção de resolução alterna o tamanho de saída da janela entre 720p, 1080p, 1440p e 4K.
 
-## Atualização V1.00-C
+## Atualização V1.00-D
 
-O menu do jogo foi ampliado e recebeu controles para resolução da janela e ativação/desativação do FSR 1 durante a partida.
+O menu durante o jogo mantém os controles da V1.00-C para resolução da janela e ativação/desativação do FSR 1. O launcher agora identifica e aceita os dumps CUSA01933 e CUSA01966 pelo `TITLE_ID` de `sce_sys/param.sfo`; outras versões são recusadas.
+
+### Resolução automática
+
+Na opção **Automática (recomendada)**, a resolução de saída define o tamanho da janela/tela e a resolução interna define o tamanho em que o jogo renderiza antes do upscaling. O mapeamento é: saída 720p → interna 720p; 1080p → 720p; 1440p → 1080p; 4K → 1440p. Os valores manuais continuam disponíveis. O FSR 1 pode ampliar a imagem quando a resolução interna for menor que a saída.
 
 ## Compilar
 
